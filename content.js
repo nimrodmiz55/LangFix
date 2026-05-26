@@ -42,15 +42,16 @@ function getText(el) {
 // the change, covering WhatsApp Web, ChatGPT, Facebook, and plain inputs.
 function setText(el, text) {
   if (el.isContentEditable) {
-    // 1. Select all existing content inside the editable node
+    // Force focus so the element owns the active selection — without this,
+    // execCommand targets the wrong node on WhatsApp Web and similar editors.
+    el.focus();
+
     const sel = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(el);
     sel.removeAllRanges();
     sel.addRange(range);
 
-    // 2. execCommand fires a real InputEvent that ProseMirror/Lexical listen to.
-    //    A plain el.innerText assignment bypasses those frameworks entirely.
     if (!document.execCommand('insertText', false, text)) {
       // Fallback: direct mutation + manual InputEvent for edge cases
       el.innerText = text;
@@ -160,3 +161,14 @@ document.addEventListener('click', e => {
 const reposition = () => { if (activeEl) showButton(activeEl); };
 window.addEventListener('scroll', reposition, { capture: true, passive: true });
 window.addEventListener('resize', reposition);
+
+// ── Auto-focus bootstrap ───────────────────────────────────────────────────────
+// Pages like Google auto-focus their search bar before the content script loads,
+// so focusin is never fired. Poll once after a short delay to catch this case.
+setTimeout(() => {
+  const el = document.activeElement;
+  if (isEditable(el)) {
+    activeEl = el;
+    showButton(el);
+  }
+}, 500);
