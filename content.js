@@ -1,4 +1,4 @@
-// Standard Israeli QWERTY layout: English key → Hebrew character produced
+// ── Keyboard map ───────────────────────────────────────────────────────────────
 const EN_TO_HE = {
   q:'/', w:"'", e:'ק', r:'ר', t:'א', y:'ט', u:'ו', i:'ן', o:'ם', p:'פ',
   a:'ש', s:'ד', d:'ג', f:'כ', g:'ע', h:'י', j:'ח', k:'ל', l:'ך',
@@ -7,46 +7,64 @@ const EN_TO_HE = {
   ',':'ת', '.':'ץ', '/':'.'
 };
 
-// Build reverse map: Hebrew character → English key
 const HE_TO_EN = Object.fromEntries(
   Object.entries(EN_TO_HE).map(([en, he]) => [he, en])
 );
 
-// Count Hebrew vs Latin chars to decide conversion direction.
-// Returns 'en-to-he', 'he-to-en', or null if nothing to convert.
+// ── Language detection ─────────────────────────────────────────────────────────
 function detectDirection(text) {
-  const heCount = (text.match(/[֐-׿]/g) || []).length;
-  const enCount = (text.match(/[a-zA-Z]/g) || []).length;
-  if (heCount === 0 && enCount === 0) return null;
-  return heCount >= enCount ? 'he-to-en' : 'en-to-he';
+  const he = (text.match(/[֐-׿]/g) || []).length;
+  const en = (text.match(/[a-zA-Z]/g) || []).length;
+  if (!he && !en) return null;
+  return he >= en ? 'he-to-en' : 'en-to-he';
 }
 
 function convertText(text) {
   const dir = detectDirection(text);
   if (!dir) return text;
   const map = dir === 'en-to-he' ? EN_TO_HE : HE_TO_EN;
-  // Lowercase before lookup so uppercase Latin letters also match
   return [...text].map(ch => map[ch.toLowerCase()] ?? ch).join('');
 }
 
+// ── Element helpers ────────────────────────────────────────────────────────────
 function isEditable(el) {
   if (!el) return false;
   if (el.isContentEditable) return true;
-  const tag = el.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA';
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
 }
 
-function getValue(el) {
-  return el.isContentEditable ? el.innerText : el.value;
+function getText(el) {
+  // innerText respects line breaks; textContent is the fallback
+  return el.isContentEditable ? (el.innerText || el.textContent || '') : el.value;
 }
 
-// Use the native property setter so frameworks (React, Vue) detect the change
-function setValue(el, text) {
+// Sets text in a way that makes React/ProseMirror/Lexical/Draft.js aware of
+// the change, covering WhatsApp Web, ChatGPT, Facebook, and plain inputs.
+function setText(el, text) {
   if (el.isContentEditable) {
-    el.innerText = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    // 1. Select all existing content inside the editable node
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // 2. execCommand fires a real InputEvent that ProseMirror/Lexical listen to.
+    //    A plain el.innerText assignment bypasses those frameworks entirely.
+    if (!document.execCommand('insertText', false, text)) {
+      // Fallback: direct mutation + manual InputEvent for edge cases
+      el.innerText = text;
+      el.dispatchEvent(new InputEvent('input', {
+        bubbles: true, cancelable: true,
+        inputType: 'insertText', data: text
+      }));
+    }
     return;
   }
+
+  // For React controlled <input>/<textarea>: React overrides the value setter,
+  // so we reach past it via the prototype, then fire input/change so React's
+  // synthetic event system syncs its internal fiber state.
   const proto = window[el.tagName === 'TEXTAREA'
     ? 'HTMLTextAreaElement'
     : 'HTMLInputElement'].prototype;
@@ -56,13 +74,40 @@ function setValue(el, text) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// ── Floating button ──────────────────────────────────────────────────────────
+// ── Core conversion ────────────────────────────────────────────────────────────
+let activeEl = null;
 
+function applyConversion() {
+  const el = activeEl || document.activeElement;
+  if (!isEditable(el)) return;
+  const original = getText(el);
+  const converted = convertText(original);
+  if (converted !== original) setText(el, converted);
+}
+
+// ── Keyboard shortcut ──────────────────────────────────────────────────────────
+// FIX 1 — OS layout agnostic: e.code is the PHYSICAL key ('KeyC') regardless
+// of whether the OS keyboard is set to English or Hebrew. e.key would be 'c'
+// in English layout but 'ב' in Hebrew layout — both are wrong to rely on.
+//
+// FIX 2 — Event burial: { capture: true } intercepts the event BEFORE any
+// site script sees it. The three stop calls together prevent WhatsApp/ChatGPT
+// from treating Alt+C as a submit or other action.
+document.addEventListener('keydown', e => {
+  if (e.altKey && e.code === 'KeyC') {
+    e.preventDefault();               // block default browser action
+    e.stopPropagation();              // stop bubbling phase
+    e.stopImmediatePropagation();     // stop other capture-phase listeners
+    applyConversion();
+  }
+}, { capture: true });
+
+// ── Floating button ────────────────────────────────────────────────────────────
 const btn = document.createElement('button');
-btn.setAttribute('aria-label', 'LangFix: convert language');
+btn.setAttribute('aria-label', 'LangFix – convert language');
 btn.textContent = 'EN↔HE';
 btn.style.cssText = [
-  'all:unset',                          // reset page styles
+  'all:unset',
   'position:fixed',
   'z-index:2147483647',
   'padding:2px 6px',
@@ -73,20 +118,15 @@ btn.style.cssText = [
   'cursor:pointer',
   'box-shadow:0 1px 5px rgba(0,0,0,.4)',
   'display:none',
-  'opacity:.9',
-  'transition:opacity .15s',
   'pointer-events:auto',
 ].join(';');
 
 document.body.appendChild(btn);
 
-let activeEl = null;
-
 function showButton(el) {
   const r = el.getBoundingClientRect();
-  // Place button inside the top-right corner of the input
   btn.style.top  = `${r.top  + 4}px`;
-  btn.style.left = `${r.right - 54}px`;  // ~54 px matches button width
+  btn.style.left = `${r.right - 54}px`;
   btn.style.display = 'block';
 }
 
@@ -95,50 +135,28 @@ function hideButton() {
   activeEl = null;
 }
 
-function applyConversion() {
-  const el = activeEl || document.activeElement;
-  if (!isEditable(el)) return;
-  const original = getValue(el);
-  const converted = convertText(original);
-  if (converted !== original) setValue(el, converted);
-}
-
-// Prevent the button click from stealing focus away from the active input
+// mousedown preventDefault keeps focus on the input — button click never steals it
 btn.addEventListener('mousedown', e => e.preventDefault());
 btn.addEventListener('click', applyConversion);
 
-// ── Focus tracking ────────────────────────────────────────────────────────────
-
+// ── Focus tracking ─────────────────────────────────────────────────────────────
 document.addEventListener('focusin', e => {
   if (isEditable(e.target)) {
     activeEl = e.target;
     showButton(e.target);
   } else {
-    // Tab-navigated to a non-editable element
     hideButton();
   }
 });
 
-// Cover clicks on non-focusable areas (no focusin fires for those)
+// Cover clicks on non-focusable areas (focusin never fires for them)
 document.addEventListener('click', e => {
   if (e.target === btn) return;
   if (!isEditable(e.target)) {
-    setTimeout(() => {
-      if (!isEditable(document.activeElement)) hideButton();
-    }, 0);
+    setTimeout(() => { if (!isEditable(document.activeElement)) hideButton(); }, 0);
   }
 });
 
-// Reposition while the user scrolls or resizes
 const reposition = () => { if (activeEl) showButton(activeEl); };
 window.addEventListener('scroll', reposition, { capture: true, passive: true });
 window.addEventListener('resize', reposition);
-
-// ── Keyboard shortcut (Alt+C) ─────────────────────────────────────────────────
-
-document.addEventListener('keydown', e => {
-  if (e.altKey && e.key === 'c') {
-    e.preventDefault();
-    applyConversion();
-  }
-});
