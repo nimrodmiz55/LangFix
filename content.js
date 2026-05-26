@@ -42,33 +42,12 @@ function getText(el) {
 // the change, covering WhatsApp Web, ChatGPT, Facebook, and plain inputs.
 function setText(el, text) {
   if (el.isContentEditable) {
-    // 1. Force focus — ensures the element owns the active selection before we
-    //    manipulate it, critical after a floating-button click that steals focus.
+    // Focus first so execCommand targets this element, not whatever was last active.
     el.focus();
-
-    // 2. Select ALL child nodes via selectNodeContents.
-    //    execCommand('selectAll') only selects the last text node when spaces are
-    //    present, and synthetic Ctrl+A KeyboardEvents are blocked as untrusted by
-    //    modern browsers. selectNodeContents anchors the range at the container
-    //    level, covering every child node regardless of depth or whitespace.
-    const sel   = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    sel.removeAllRanges();
-    sel.addRange(range);
-
-    // 3. Replace the selection with the converted text.
-    //    execCommand routes through the browser's input pipeline, which React /
-    //    Draft.js / Lexical intercept to keep their internal state in sync.
-    if (!document.execCommand('insertText', false, text)) {
-      // Fallback: direct DOM mutation + synthetic InputEvent for runtimes where
-      // execCommand is unavailable or has been disabled.
-      el.innerText = text;
-      el.dispatchEvent(new InputEvent('input', {
-        bubbles: true, cancelable: true,
-        inputType: 'insertText', data: text,
-      }));
-    }
+    // insertText fires through the browser's input pipeline; React/Draft.js/Lexical
+    // intercept it to keep their fiber state in sync. Relies on the user having
+    // selected the text first — see README "Known Limitations" for details.
+    document.execCommand('insertText', false, text);
     return;
   }
 

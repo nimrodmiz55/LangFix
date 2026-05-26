@@ -21,3 +21,16 @@ Since this extension is loaded locally, follow these quick steps to add it to yo
 Once installed, simply type in any text field. If you notice you're typing in the wrong language, you have two quick options:
 * **Keyboard Shortcut:** Press `Alt + C` to instantly flip the active text.
 * **Floating Button:** Click the small `EN↔HE` button floating right below your active text box.
+
+## ⚠️ Known Limitations
+
+**Single-word text is converted automatically.** For multi-word text on complex platforms like WhatsApp Web, an extra step is required.
+
+React-based rich-text editors (WhatsApp Web, Facebook Messenger, etc.) wrap each word in its own internal `<span>` element. Programmatically selecting across those spans and replacing the content causes React's virtual DOM to conflict with the real DOM and instantly revert the change. Until a reliable cross-platform workaround is found, automatic full-selection is disabled on these editors.
+
+**How to fix multi-word text on WhatsApp Web:**
+
+1. Select all the text you want to convert manually — use `Ctrl + A` inside the text box, or click and drag.
+2. Press `Alt + C` (or click the floating `EN↔HE` button).
+
+The extension will replace exactly what you have highlighted.
