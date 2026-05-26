@@ -124,17 +124,9 @@ btn.style.cssText = [
 document.body.appendChild(btn);
 
 function showButton(el) {
-  const r   = el.getBoundingClientRect();
-  const GAP = 6; // px between input's right edge and button's left edge
-
-  // Clamp so the button never spills past the right viewport edge
-  const left = Math.min(r.right + GAP, window.innerWidth - btn.offsetWidth - 4);
-
-  // Vertically centre the button relative to the input; cap at the top of the viewport
-  const top = Math.max(4, r.top + (r.height - btn.offsetHeight) / 2);
-
-  btn.style.top  = `${top}px`;
-  btn.style.left = `${left}px`;
+  const r = el.getBoundingClientRect();
+  btn.style.top  = `${r.bottom + 5}px`;
+  btn.style.left = `${r.right - 54}px`;
   btn.style.display = 'block';
 }
 
