@@ -42,50 +42,27 @@ function getText(el) {
 // the change, covering WhatsApp Web, ChatGPT, Facebook, and plain inputs.
 function setText(el, text) {
   if (el.isContentEditable) {
-    // 1. Force focus — without this, a floating-button click leaves the browser
-    //    focus on the button and the subsequent selection targets a stale node.
+    // 1. Force focus — ensures the element owns the active selection before we
+    //    manipulate it, critical after a floating-button click that steals focus.
     el.focus();
-    // Dispatch a synthetic FocusEvent so React's event-delegation layer also
-    // registers the element as active (programmatic focus() alone may not fire
-    // the synthetic React onFocus that updates the editor's internal state).
-    el.dispatchEvent(new FocusEvent('focus', { bubbles: false, cancelable: false }));
 
-    // 2. Aggressively select all text using the Selection API.
-    //    execCommand('selectAll') is intercepted and swallowed by WhatsApp Web
-    //    before it reaches the browser, so we bypass it entirely.
-    //    We walk to the deepest first/last text nodes so the range anchors
-    //    correctly even inside WhatsApp's nested <p>/<span> structure.
+    // 2. Select ALL child nodes via selectNodeContents.
+    //    execCommand('selectAll') only selects the last text node when spaces are
+    //    present, and synthetic Ctrl+A KeyboardEvents are blocked as untrusted by
+    //    modern browsers. selectNodeContents anchors the range at the container
+    //    level, covering every child node regardless of depth or whitespace.
     const sel   = window.getSelection();
     const range = document.createRange();
-
-    const deepFirst = node => {
-      while (node.firstChild) node = node.firstChild;
-      return node;
-    };
-    const deepLast = node => {
-      while (node.lastChild) node = node.lastChild;
-      return node;
-    };
-
-    const first = deepFirst(el);
-    const last  = deepLast(el);
-    try {
-      range.setStart(first, 0);
-      range.setEnd(last, last.nodeType === Node.TEXT_NODE ? last.length : last.childNodes.length);
-    } catch (_) {
-      // If the deep-walk fails on an unusual DOM, fall back to container select
-      range.selectNodeContents(el);
-    }
+    range.selectNodeContents(el);
     sel.removeAllRanges();
     sel.addRange(range);
 
     // 3. Replace the selection with the converted text.
-    //    execCommand keeps React / Draft.js / Lexical in sync through their
-    //    synthetic event delegation layers — direct innerText assignment would
-    //    update the DOM but leave framework state stale.
+    //    execCommand routes through the browser's input pipeline, which React /
+    //    Draft.js / Lexical intercept to keep their internal state in sync.
     if (!document.execCommand('insertText', false, text)) {
-      // Fallback: mutate the DOM and fire a synthetic InputEvent that React's
-      // reconciler recognises as a controlled-input change.
+      // Fallback: direct DOM mutation + synthetic InputEvent for runtimes where
+      // execCommand is unavailable or has been disabled.
       el.innerText = text;
       el.dispatchEvent(new InputEvent('input', {
         bubbles: true, cancelable: true,
